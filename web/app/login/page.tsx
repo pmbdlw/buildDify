@@ -1,18 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { ApiError, getMe, login, register, type User } from '@/lib/api'
+import { useRouter } from 'next/navigation'
+import { ApiError, getMe, login, register } from '@/lib/api'
 
 type Mode = 'login' | 'register'
 
 export default function LoginPage() {
+  const router = useRouter()
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [user, setUser] = useState<User | null>(null)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -23,33 +24,12 @@ export default function LoginPage() {
         await register(email, password, name)
       }
       await login(email, password)
-      setUser(await getMe())
+      await getMe()
+      router.push('/chat')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '网络错误')
-    } finally {
       setLoading(false)
     }
-  }
-
-  if (user) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-        <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-          <h1 className="text-xl font-semibold text-gray-900">登录成功 🎉</h1>
-          <dl className="mt-4 space-y-1 text-sm text-gray-600">
-            <div>邮箱:{user.email}</div>
-            <div>名称:{user.name || '—'}</div>
-            <div className="truncate">ID:{user.id}</div>
-          </dl>
-          <button
-            className="mt-6 w-full rounded-lg bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
-            onClick={() => setUser(null)}
-          >
-            返回
-          </button>
-        </div>
-      </main>
-    )
   }
 
   return (

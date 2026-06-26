@@ -43,12 +43,12 @@
 
 - [x] `llm/` provider 抽象 + **双格式上游**(`AnthropicProvider` + `OpenAIProvider`,chat/stream/embed)+ 工厂路由
 - [x] **双格式下游网关**:`/v1/chat/completions`(OpenAI)、`/v1/messages`(Anthropic)、`/v1/embeddings`,跨格式互通(讯飞 MaaS 实测)
-- [ ] `app_conversation` / `app_message` 表 + 迁移
-- [ ] 对话 service:创建会话、追加消息、调用 LLM
-- [ ] SSE 流式接口 `POST /chat`
-- [ ] 前端对话 UI(消息流 + 流式渲染 + 历史列表)
+- [x] `app_conversation` / `app_message` 表 + 迁移(`idx_` 命名自动生效)
+- [x] 对话 service:建会话、存消息、构建历史请求(流式落库用独立会话)
+- [x] SSE 流式接口 `POST /api/chat` + `GET /api/conversations`、`/conversations/{id}/messages`
+- [x] 前端对话 UI(侧边栏会话列表 + 流式渲染 + Enter 发送)
 
-**验收**:网页里发消息,Claude 流式回复,刷新后历史还在。
+**验收**:✅ 浏览器实测 —— 登录→发消息→流式回复→新会话自动建标题→刷新后会话列表与完整历史均在(讯飞 `xopqwen36v35b`)。后端 18 passed,前端 build 通过。
 
 ## D3 — 知识库 RAG
 

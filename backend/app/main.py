@@ -6,15 +6,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, llm_gateway
+from app.api import auth, chat, llm_gateway
 from app.core.config import settings
 
 app = FastAPI(title=settings.app_name)
 
-# 开发期允许前端跨域(生产应收紧 allow_origins)
+# 开发期允许前端跨域(生产应收紧为固定域名)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +27,7 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
 app.include_router(llm_gateway.router)  # 兼容网关:/v1/chat/completions、/v1/messages、/v1/embeddings
 
 # 后续模块:chat / knowledge / app / workflow / agent
