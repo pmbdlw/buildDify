@@ -1,0 +1,33 @@
+# ---- Python / backend ----
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- Node / frontend ----
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# ---- 环境与密钥 ----
+.env
+.env.*
+!.env.example
+
+# ---- Claude Code 本地配置(团队级 settings.json 仍提交)----
+.claude/settings.local.json
+
+# ---- 数据 / 上传 / 日志 ----
+/data/
+/uploads/
+*.log
+
+# ---- OS / 编辑器 ----
+.DS_Store
+.idea/
+.vscode/

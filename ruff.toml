@@ -1,0 +1,26 @@
+# Ruff config — 后端 Python(3.12)代码风格与静态检查
+target-version = "py312"
+line-length = 100
+
+[lint]
+# 启用常用规则:pycodestyle(E/W)、pyflakes(F)、isort(I)、bugbear(B)、pyupgrade(UP)
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["E501"]  # 行长由 formatter 处理
+
+[lint.flake8-bugbear]
+# FastAPI 的依赖注入在参数默认值里调用 Depends/Query/... 是标准写法,放行
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.Body",
+  "fastapi.Header",
+  "fastapi.Cookie",
+  "fastapi.File",
+  "fastapi.Form",
+  "fastapi.Security",
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
