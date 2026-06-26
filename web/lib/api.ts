@@ -97,8 +97,15 @@ export function getMessages(conversationId: string) {
   return apiFetch<ChatMessage[]>(`/api/conversations/${conversationId}/messages`)
 }
 
+export interface Citation {
+  index: number
+  document_id: string
+  content: string
+  score: number
+}
+
 export interface StreamHandlers {
-  onMeta?: (conversationId: string, model: string) => void
+  onMeta?: (conversationId: string, model: string, citations: Citation[]) => void
   onDelta?: (text: string) => void
   onDone?: (messageId: string) => void
   onError?: (message: string) => void
@@ -106,7 +113,7 @@ export interface StreamHandlers {
 
 // POST + Bearer 的 SSE 用 fetch 流读(EventSource 不支持自定义头与 POST)
 export async function streamChat(
-  body: { content: string; conversation_id?: string; model?: string },
+  body: { content: string; conversation_id?: string; model?: string; dataset_id?: string },
   handlers: StreamHandlers,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat`, {
@@ -135,10 +142,65 @@ export async function streamChat(
       const line = block.trim()
       if (!line.startsWith('data:')) continue
       const evt = JSON.parse(line.slice(5).trim())
-      if (evt.type === 'meta') handlers.onMeta?.(evt.conversation_id, evt.model)
+      if (evt.type === 'meta')
+        handlers.onMeta?.(evt.conversation_id, evt.model, evt.citations ?? [])
       else if (evt.type === 'delta') handlers.onDelta?.(evt.content)
       else if (evt.type === 'done') handlers.onDone?.(evt.message_id)
       else if (evt.type === 'error') handlers.onError?.(evt.message)
     }
   }
+}
+
+// ---- 知识库 ----
+export interface Dataset {
+  id: string
+  name: string
+  description: string | null
+  embedding_model: string
+  created_at: string
+  updated_at: string
+}
+
+export interface KbDocument {
+  id: string
+  dataset_id: string
+  name: string
+  file_type: string
+  status: string // pending | processing | ready | error
+  error: string | null
+  char_count: number
+  segment_count: number
+  created_at: string
+  updated_at: string
+}
+
+export function listDatasets() {
+  return apiFetch<Dataset[]>('/api/knowledge/datasets')
+}
+
+export function createDataset(name: string, description?: string) {
+  return apiFetch<Dataset>('/api/knowledge/datasets', {
+    method: 'POST',
+    body: JSON.stringify({ name, description: description ?? null }),
+  })
+}
+
+export function listDocuments(datasetId: string) {
+  return apiFetch<KbDocument[]>(`/api/knowledge/datasets/${datasetId}/documents`)
+}
+
+// 文件上传走 multipart;不要手动设 Content-Type,交给浏览器带 boundary
+export async function uploadDocument(datasetId: string, file: File): Promise<KbDocument> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE}/api/knowledge/datasets/${datasetId}/documents`, {
+    method: 'POST',
+    headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    body: form,
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, detail?.detail ?? `上传失败(${res.status})`)
+  }
+  return res.json() as Promise<KbDocument>
 }

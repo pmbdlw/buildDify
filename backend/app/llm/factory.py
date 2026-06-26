@@ -13,12 +13,21 @@ _BUILDERS = {
 }
 
 
-@cache
-def get_provider(name: str) -> LLMProvider:
+def build_provider(name: str) -> LLMProvider:
+    """构造一个全新的 provider 实例(不走缓存)。
+
+    Celery worker 每个任务在独立事件循环中运行,httpx/asyncpg 连接与事件循环绑定,
+    故 worker 侧需用新实例而非进程级缓存,避免跨循环复用连接报错。
+    """
     try:
         return _BUILDERS[name]()
     except KeyError as exc:
         raise ValueError(f"未知 LLM provider: {name}") from exc
+
+
+@cache
+def get_provider(name: str) -> LLMProvider:
+    return build_provider(name)
 
 
 def provider_for_model(model: str | None) -> str:

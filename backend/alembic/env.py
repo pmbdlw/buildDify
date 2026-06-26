@@ -11,6 +11,7 @@ from app.models.base import Base
 
 # 导入所有模型,确保它们注册到 Base.metadata(autogenerate 才能发现)
 from app.models import conversation as _conversation  # noqa: F401
+from app.models import knowledge as _knowledge  # noqa: F401
 from app.models import user as _user  # noqa: F401
 
 # this is the Alembic Config object, which provides

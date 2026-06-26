@@ -10,6 +10,7 @@ class ChatIn(BaseModel):
     content: str = Field(min_length=1)
     conversation_id: uuid.UUID | None = None
     model: str | None = None
+    dataset_id: uuid.UUID | None = None  # 选中知识库时启用 RAG 检索
 
 
 class ConversationOut(BaseModel):

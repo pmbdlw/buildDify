@@ -6,7 +6,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, chat, llm_gateway
+from app.api import auth, chat, knowledge, llm_gateway
 from app.core.config import settings
 
 app = FastAPI(title=settings.app_name)
@@ -28,6 +28,7 @@ async def health() -> dict[str, str]:
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(knowledge.router, prefix="/api")
 app.include_router(llm_gateway.router)  # 兼容网关:/v1/chat/completions、/v1/messages、/v1/embeddings
 
 # 后续模块:chat / knowledge / app / workflow / agent

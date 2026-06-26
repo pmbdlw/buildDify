@@ -32,11 +32,12 @@ async def chat(
     """发送一条消息,SSE 流式返回助手回复;用户消息即时落库,助手消息流结束后落库。"""
     service = ConversationService(session)
     try:
-        conv, req = await service.start_turn(
+        conv, req, citations = await service.start_turn(
             user_id=current_user.id,
             content=data.content,
             conversation_id=data.conversation_id,
             model=data.model,
+            dataset_id=data.dataset_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -44,9 +45,25 @@ async def chat(
     provider = resolve_provider(req.model)
     model_name = req.model or provider.default_model
     conv_id = conv.id
+    citations_payload = [
+        {
+            "index": c.index,
+            "document_id": str(c.document_id),
+            "content": c.content,
+            "score": c.score,
+        }
+        for c in citations
+    ]
 
     async def gen():
-        yield _sse({"type": "meta", "conversation_id": str(conv_id), "model": model_name})
+        yield _sse(
+            {
+                "type": "meta",
+                "conversation_id": str(conv_id),
+                "model": model_name,
+                "citations": citations_payload,
+            }
+        )
         parts: list[str] = []
         try:
             async for text in provider.stream(req):

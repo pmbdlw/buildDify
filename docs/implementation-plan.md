@@ -54,14 +54,16 @@
 
 **目标**:上传文档后能基于知识库问答并附引用。
 
-- [ ] `kb_dataset` / `kb_document` / `kb_segment`(含 `vector` 列 + 索引)+ 迁移
-- [ ] 文档上传接口 + 解析(PDF/MD/TXT)
-- [ ] Celery worker:分块 → embedding → 入库;文档状态机
-- [ ] 检索 service:query embedding + pgvector top-k
-- [ ] 对话链路接入 RAG:检索 → 拼接上下文 → 生成 → 返回引用
-- [ ] 前端:知识库管理 + 上传 + 问答时展示引用
+- [x] `kb_dataset` / `kb_document` / `kb_segment`(含 `vector(768)` 列 + 索引)+ 迁移(`CREATE EXTENSION vector`)
+- [x] 文档上传接口 + 解析(PDF/MD/TXT,上传时同步解析为文本落库)
+- [x] Celery worker:分块 → embedding → 入库;文档状态机 `pending→processing→ready/error`
+- [x] 检索 service:query embedding + pgvector 余弦 top-k
+- [x] 对话链路接入 RAG:`ChatIn.dataset_id` → 检索 → 拼接 system 上下文 → 生成 → SSE meta 返回引用
+- [x] 前端:知识库管理页(建库/上传/状态轮询)+ 对话页数据集选择 + 引用来源折叠展示
 
-**验收**:上传一篇文档,等待 ready,提问能得到基于文档内容的回答且能看到引用来源。
+**验收**:✅ 浏览/curl 实测 —— 上传 MD→worker 处理至 ready(讯飞 768 维 embedding)→选库提问"数据库映射到哪个端口",回答"5433,因 5432 常被占用 [1]"并带 1 条引用。后端 26 passed,前后端 build 通过。
+
+> worker 启动:`uv run celery -A app.tasks.celery_app worker -l info`(需 redis)。
 
 ## D4 — 应用构建器(Chatbot 应用类型)
 

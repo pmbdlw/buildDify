@@ -13,6 +13,7 @@ from app.llm.base import ChatRequest, Usage
 from app.llm.base import Message as LLMMessage
 from app.models.conversation import Conversation
 from app.repositories.conversation import ConversationRepository, MessageRepository
+from app.services.retrieval import Citation, RetrievalService, build_rag_system_prompt
 
 
 class ConversationService:
@@ -28,8 +29,9 @@ class ConversationService:
         content: str,
         conversation_id: uuid.UUID | None,
         model: str | None,
-    ) -> tuple[Conversation, ChatRequest]:
-        """建/取会话 + 落库用户消息 + 构建 ChatRequest(含历史)。"""
+        dataset_id: uuid.UUID | None = None,
+    ) -> tuple[Conversation, ChatRequest, list[Citation]]:
+        """建/取会话 + 落库用户消息 + 构建 ChatRequest(含历史);选中知识库则做 RAG 检索。"""
         if conversation_id is None:
             conv = await self.conversations.create(
                 user_id=user_id,
@@ -45,13 +47,23 @@ class ConversationService:
         await self.messages.add(conversation_id=conv.id, role="user", content=content)
         await self.session.commit()
 
+        # RAG:基于本轮用户输入检索知识库,把片段注入 system,并回传引用
+        citations: list[Citation] = []
+        system = conv.system_prompt
+        if dataset_id is not None:
+            citations = await RetrievalService(self.session).retrieve(
+                dataset_id=dataset_id, query=content
+            )
+            if citations:
+                system = build_rag_system_prompt(conv.system_prompt, citations)
+
         history = await self.messages.list_for_conversation(conv.id)
         req = ChatRequest(
             messages=[LLMMessage(role=m.role, content=m.content) for m in history],
             model=model or conv.model,
-            system=conv.system_prompt,
+            system=system,
         )
-        return conv, req
+        return conv, req, citations
 
 
 async def persist_assistant_message(

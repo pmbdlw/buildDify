@@ -2,17 +2,22 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
+  type Citation,
   type Conversation,
+  type Dataset,
   getMessages,
   getToken,
   listConversations,
+  listDatasets,
   streamChat,
 } from '@/lib/api'
 
 interface UIMessage {
   role: string
   content: string
+  citations?: Citation[]
 }
 
 export default function ChatPage() {
@@ -22,6 +27,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [datasets, setDatasets] = useState<Dataset[]>([])
+  const [datasetId, setDatasetId] = useState<string>('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -30,6 +37,9 @@ export default function ChatPage() {
       return
     }
     void refreshConversations()
+    void listDatasets()
+      .then(setDatasets)
+      .catch(() => {})
   }, [router])
 
   useEffect(() => {
@@ -64,13 +74,26 @@ export default function ChatPage() {
 
     try {
       await streamChat(
-        { content, conversation_id: activeId ?? undefined },
         {
-          onMeta: (cid) => setActiveId(cid),
+          content,
+          conversation_id: activeId ?? undefined,
+          dataset_id: datasetId || undefined,
+        },
+        {
+          onMeta: (cid, _model, citations) => {
+            setActiveId(cid)
+            if (citations.length > 0)
+              setMessages((prev) => {
+                const next = [...prev]
+                next[next.length - 1] = { ...next[next.length - 1], citations }
+                return next
+              })
+          },
           onDelta: (text) =>
             setMessages((prev) => {
               const next = [...prev]
               next[next.length - 1] = {
+                ...next[next.length - 1],
                 role: 'assistant',
                 content: next[next.length - 1].content + text,
               }
@@ -129,13 +152,37 @@ export default function ChatPage() {
 
       {/* 主区:消息 + 输入 */}
       <main className="flex flex-1 flex-col">
+        {/* 顶栏:知识库选择(选中即启用 RAG) */}
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500">知识库</span>
+            <select
+              value={datasetId}
+              onChange={(e) => setDatasetId(e.target.value)}
+              className="rounded-lg border border-gray-300 px-2 py-1 text-sm outline-none focus:border-gray-900"
+            >
+              <option value="">不使用(普通对话)</option>
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Link href="/knowledge" className="text-sm text-gray-500 hover:text-gray-900">
+            管理知识库 →
+          </Link>
+        </div>
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="mx-auto max-w-2xl space-y-4">
             {messages.length === 0 && (
               <p className="mt-20 text-center text-gray-400">发一条消息开始对话</p>
             )}
             {messages.map((m, i) => (
-              <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+              <div
+                key={i}
+                className={m.role === 'user' ? 'flex justify-end' : 'flex flex-col items-start'}
+              >
                 <div
                   className={`whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm ${
                     m.role === 'user'
@@ -145,6 +192,22 @@ export default function ChatPage() {
                 >
                   {m.content || (streaming ? '…' : '')}
                 </div>
+                {m.citations && m.citations.length > 0 && (
+                  <div className="mt-2 max-w-[80%] space-y-1">
+                    <p className="text-xs font-medium text-gray-400">引用来源</p>
+                    {m.citations.map((c) => (
+                      <details
+                        key={c.index}
+                        className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600"
+                      >
+                        <summary className="cursor-pointer select-none">
+                          [{c.index}] 相关度 {(c.score * 100).toFixed(0)}%
+                        </summary>
+                        <p className="mt-1 whitespace-pre-wrap text-gray-500">{c.content}</p>
+                      </details>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             <div ref={bottomRef} />

@@ -33,6 +33,12 @@ class Settings(BaseSettings):
 
     # embedding(默认走 OpenAI 兼容端点;Anthropic 无原生 embedding)
     embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 768  # 讯飞 xop3qwen8bembedding 输出维度;kb_segment.embedding 列宽
+
+    # 知识库 RAG
+    kb_chunk_size: int = 500  # 分块目标字符数
+    kb_chunk_overlap: int = 80  # 相邻分块重叠字符数
+    kb_retrieval_top_k: int = 4  # 检索默认召回条数
 
 
 settings = Settings()
