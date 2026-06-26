@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // 产出独立运行包(.next/standalone),便于 Docker 精简运行镜像
+  output: "standalone",
 };
 
 export default nextConfig;

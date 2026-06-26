@@ -233,10 +233,10 @@ export function listApps() {
   return apiFetch<App[]>('/api/apps')
 }
 
-export function createApp(name: string, description?: string) {
+export function createApp(name: string, mode: string = 'chatbot', description?: string) {
   return apiFetch<App>('/api/apps', {
     method: 'POST',
-    body: JSON.stringify({ name, description: description ?? null }),
+    body: JSON.stringify({ name, mode, description: description ?? null }),
   })
 }
 
@@ -285,6 +285,101 @@ export function revokeApiKey(appId: string, keyId: string) {
   return apiFetch<void>(`/api/apps/${appId}/api-keys/${keyId}`, { method: 'DELETE' })
 }
 
+// ---- 工作流 ----
+// 画布节点/连线(对应 React Flow 与后端 graph JSON);data 为各节点自由配置
+export interface WfNode {
+  id: string
+  type: string
+  position: { x: number; y: number }
+  data: Record<string, unknown>
+}
+
+export interface WfEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+}
+
+export interface WfGraph {
+  nodes: WfNode[]
+  edges: WfEdge[]
+}
+
+export interface WorkflowListItem {
+  id: string
+  name: string
+  description: string | null
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Workflow extends WorkflowListItem {
+  app_id: string | null
+  graph: WfGraph
+}
+
+export interface NodeRun {
+  id: string
+  node_id: string
+  node_type: string
+  status: string // running | succeeded | failed | skipped
+  inputs: Record<string, unknown> | null
+  outputs: Record<string, unknown> | null
+  error: string | null
+  elapsed_ms: number | null
+  sort_order: number
+}
+
+export interface WorkflowRun {
+  id: string
+  workflow_id: string
+  status: string // pending | running | succeeded | failed
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown> | null
+  error: string | null
+  elapsed_ms: number | null
+  created_at: string
+  node_runs: NodeRun[]
+}
+
+export function listWorkflows() {
+  return apiFetch<WorkflowListItem[]>('/api/workflows')
+}
+
+export function createWorkflow(name: string, description?: string) {
+  return apiFetch<Workflow>('/api/workflows', {
+    method: 'POST',
+    body: JSON.stringify({ name, description: description ?? null }),
+  })
+}
+
+export function getWorkflow(id: string) {
+  return apiFetch<Workflow>(`/api/workflows/${id}`)
+}
+
+export function saveWorkflow(
+  id: string,
+  data: { name?: string; description?: string; graph?: WfGraph },
+) {
+  return apiFetch<Workflow>(`/api/workflows/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteWorkflow(id: string) {
+  return apiFetch<void>(`/api/workflows/${id}`, { method: 'DELETE' })
+}
+
+export function runWorkflow(id: string, inputs: Record<string, unknown>) {
+  return apiFetch<WorkflowRun>(`/api/workflows/${id}/run`, {
+    method: 'POST',
+    body: JSON.stringify({ inputs }),
+  })
+}
+
 // 应用调试对话(走最新配置版本,SSE 流式)
 export async function streamAppChat(
   appId: string,
@@ -304,6 +399,131 @@ export async function streamAppChat(
     throw new ApiError(res.status, detail?.detail ?? `请求失败(${res.status})`)
   }
   await consumeSSE(res.body, handlers)
+}
+
+// ---- Agent ----
+export interface BuiltinTool {
+  type: string
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+export interface AgentTool {
+  id: string
+  app_id: string
+  type: string
+  name: string
+  description: string | null
+  is_enabled: boolean
+  config: Record<string, unknown>
+  sort_order: number
+  created_at: string
+}
+
+export interface AgentToolInput {
+  type: string
+  name?: string | null
+  description?: string | null
+  config?: Record<string, unknown>
+}
+
+export interface AgentThought {
+  id: string
+  conversation_id: string
+  message_id: string | null
+  kind: string // thought | tool_call | observation | answer
+  content: string | null
+  tool_name: string | null
+  tool_input: Record<string, unknown> | null
+  tool_output: string | null
+  input_tokens: number
+  output_tokens: number
+  elapsed_ms: number | null
+  sort_order: number
+}
+
+export function listBuiltinTools(appId: string) {
+  return apiFetch<BuiltinTool[]>(`/api/apps/${appId}/agent/tools/catalog`)
+}
+
+export function listAgentTools(appId: string) {
+  return apiFetch<AgentTool[]>(`/api/apps/${appId}/agent/tools`)
+}
+
+export function addAgentTool(appId: string, data: AgentToolInput) {
+  return apiFetch<AgentTool>(`/api/apps/${appId}/agent/tools`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateAgentTool(
+  appId: string,
+  toolId: string,
+  data: { name?: string; description?: string; is_enabled?: boolean; config?: Record<string, unknown> },
+) {
+  return apiFetch<AgentTool>(`/api/apps/${appId}/agent/tools/${toolId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteAgentTool(appId: string, toolId: string) {
+  return apiFetch<void>(`/api/apps/${appId}/agent/tools/${toolId}`, { method: 'DELETE' })
+}
+
+export function getMessageThoughts(conversationId: string, messageId: string) {
+  return apiFetch<AgentThought[]>(
+    `/api/conversations/${conversationId}/messages/${messageId}/thoughts`,
+  )
+}
+
+// Agent 调试运行的 SSE 轨迹步骤
+export interface AgentStepEvent {
+  type: 'meta' | 'thought' | 'tool_call' | 'observation' | 'answer' | 'done' | 'error'
+  conversation_id?: string
+  model?: string
+  content?: string
+  tool?: string
+  input?: Record<string, unknown>
+  output?: string
+  message_id?: string
+  message?: string
+}
+
+export async function streamAgentChat(
+  appId: string,
+  body: { content: string; conversation_id?: string },
+  onEvent: (evt: AgentStepEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/apps/${appId}/agent/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok || !res.body) {
+    const detail = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, detail?.detail ?? `请求失败(${res.status})`)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const blocks = buf.split('\n\n')
+    buf = blocks.pop() ?? ''
+    for (const block of blocks) {
+      const line = block.trim()
+      if (!line.startsWith('data:')) continue
+      onEvent(JSON.parse(line.slice(5).trim()))
+    }
+  }
 }
 
 // SSE 流读公共逻辑(对话页与应用调试窗共用)

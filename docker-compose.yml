@@ -1,6 +1,7 @@
-# 本地依赖服务。api / worker / web 待各自 Dockerfile 就绪后加入。
-# 开发期通常只起 db + redis,后端/前端本地热重载:
-#   docker compose up -d db redis
+# 全栈编排:db / redis / api / worker / web。
+# 端到端:docker compose up -d --build(api 起前自动迁移)
+# 仅依赖(本地热重载后端/前端):docker compose up -d db redis
+# LLM 密钥等从 backend/.env 读取(见 backend/.env.example)。
 
 services:
   db:
@@ -30,6 +31,49 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      # 容器内连服务名;覆盖 .env 里指向宿主机 5433 的本地配置
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/builddify
+      REDIS_URL: redis://redis:6379/0
+    # 起服务前先把库迁到最新
+    command: sh -c "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/builddify
+      REDIS_URL: redis://redis:6379/0
+    command: uv run celery -A app.tasks.celery_app worker -l info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      args:
+        # 浏览器经宿主机访问 api(api 映射到 localhost:8000)
+        NEXT_PUBLIC_API_BASE: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
 
 volumes:
   pg_data:

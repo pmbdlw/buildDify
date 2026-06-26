@@ -1,18 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import {
   type Citation,
   type Conversation,
   type Dataset,
   getMessages,
-  getToken,
   listConversations,
   listDatasets,
   streamChat,
 } from '@/lib/api'
+import { useRequireAuth } from '@/lib/auth'
+import TopNav from '@/components/TopNav'
+import { PageLoading } from '@/components/States'
 
 interface UIMessage {
   role: string
@@ -21,7 +21,7 @@ interface UIMessage {
 }
 
 export default function ChatPage() {
-  const router = useRouter()
+  const { ready, user } = useRequireAuth()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<UIMessage[]>([])
@@ -32,15 +32,12 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace('/login')
-      return
-    }
+    if (!ready) return
     void refreshConversations()
     void listDatasets()
       .then(setDatasets)
       .catch(() => {})
-  }, [router])
+  }, [ready])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -119,8 +116,12 @@ export default function ChatPage() {
     }
   }
 
+  if (!ready) return <PageLoading text="校验登录态…" full />
+
   return (
-    <div className="flex h-screen bg-white text-gray-900">
+    <div className="flex h-screen flex-col bg-white text-gray-900">
+      <TopNav user={user} />
+      <div className="flex min-h-0 flex-1">
       {/* 侧边栏:会话列表 */}
       <aside className="flex w-64 flex-col border-r border-gray-200 bg-gray-50">
         <div className="p-3">
@@ -168,14 +169,6 @@ export default function ChatPage() {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="flex gap-4 text-sm text-gray-500">
-            <Link href="/apps" className="hover:text-gray-900">
-              应用
-            </Link>
-            <Link href="/knowledge" className="hover:text-gray-900">
-              管理知识库 →
-            </Link>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -244,6 +237,7 @@ export default function ChatPage() {
           </div>
         </div>
       </main>
+      </div>
     </div>
   )
 }

@@ -17,8 +17,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
-# 应用类型(MVP 仅 chatbot;后续 workflow / agent)
+# 应用类型(chatbot 对话 / agent 工具调用;workflow 走独立工作流模块)
 APP_MODE_CHATBOT = "chatbot"
+APP_MODE_AGENT = "agent"
 
 # 应用状态
 APP_DRAFT = "draft"

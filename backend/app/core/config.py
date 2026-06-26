@@ -40,5 +40,8 @@ class Settings(BaseSettings):
     kb_chunk_overlap: int = 80  # 相邻分块重叠字符数
     kb_retrieval_top_k: int = 4  # 检索默认召回条数
 
+    # Agent
+    agent_max_iterations: int = 6  # ReAct 单回合最大推理步数(防止工具调用死循环)
+
 
 settings = Settings()

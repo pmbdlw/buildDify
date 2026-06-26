@@ -26,7 +26,31 @@ def to_anthropic_tools(tools: list[ToolSpec] | None) -> list[dict] | None:
 
 
 def _messages_payload(req: ChatRequest) -> list[dict]:
-    return [{"role": m.role, "content": m.content} for m in req.messages]
+    payload: list[dict] = []
+    for m in req.messages:
+        if m.role == "tool":
+            # 工具返回 → user 消息内的 tool_result 块;连续多条工具返回合并进同一 user 消息
+            block = {
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id or "",
+                "content": m.content,
+            }
+            if payload and payload[-1]["role"] == "user" and isinstance(payload[-1]["content"], list):
+                payload[-1]["content"].append(block)
+            else:
+                payload.append({"role": "user", "content": [block]})
+        elif m.role == "assistant" and m.tool_calls:
+            blocks: list[dict] = []
+            if m.content:
+                blocks.append({"type": "text", "text": m.content})
+            blocks.extend(
+                {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.arguments}
+                for tc in m.tool_calls
+            )
+            payload.append({"role": "assistant", "content": blocks})
+        else:
+            payload.append({"role": m.role, "content": m.content})
+    return payload
 
 
 class AnthropicProvider:

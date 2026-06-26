@@ -35,7 +35,32 @@ def to_openai_messages(req: ChatRequest) -> list[dict]:
     msgs: list[dict] = []
     if req.system:
         msgs.append({"role": "system", "content": req.system})
-    msgs.extend({"role": m.role, "content": m.content} for m in req.messages)
+    for m in req.messages:
+        if m.role == "tool":
+            # 工具返回:必须带 tool_call_id 关联到前一条 assistant 的 tool_calls
+            msgs.append(
+                {"role": "tool", "tool_call_id": m.tool_call_id or "", "content": m.content}
+            )
+        elif m.role == "assistant" and m.tool_calls:
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": m.content or None,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for tc in m.tool_calls
+                    ],
+                }
+            )
+        else:
+            msgs.append({"role": m.role, "content": m.content})
     return msgs
 
 

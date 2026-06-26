@@ -16,8 +16,8 @@
 | M1 地基就绪 | D1 末 | compose 起得来,迁移能跑,能登录 |
 | M2 对话可用 | D2 末 | 前端能与 Claude 流式对话并存历史 |
 | M3 RAG 可用 | D3 末 | 上传文档后能基于知识库问答并附引用 |
-| M4 应用 + 工作流 | D5 末 | 能创建 chatbot 应用;能跑一个多节点工作流 |
-| M5 Agent + 收尾 | D7 末 | Agent 工具调用可用;compose 端到端跑通 |
+| ✅ M4 应用 + 工作流 | D5 末 | 能创建 chatbot 应用;能跑一个多节点工作流 |
+| ✅ M5 Agent + 收尾 | D7 末 | Agent 工具调用可用;compose 端到端跑通 |
 
 ---
 
@@ -81,37 +81,41 @@
 
 **目标**:节点编排引擎 + 可视化编辑器,跑通多节点工作流。
 
-- [ ] `wf_workflow` / `wf_run` / `wf_node_run` + 迁移
-- [ ] 执行引擎:拓扑排序 + 变量池 + 统一节点接口
-- [ ] 节点:`start`/`end`/`llm`/`knowledge_retrieval`/`condition`/`code`/`template`
-- [ ] 运行接口 + 运行记录回放
-- [ ] 前端:React Flow 编辑器(拖拽节点、连线、配置面板、运行可视化)
+- [x] `wf_workflow` / `wf_run` / `wf_node_run` + 迁移(graph 存 JSONB,version 自增)
+- [x] 执行引擎:Kahn 拓扑排序 + 变量池(`{{ node.field }}` 解析)+ 统一节点接口 + 条件分支激活/跳过
+- [x] 节点:`start`/`end`/`llm`/`knowledge_retrieval`/`condition`/`code`(受限 builtins)/`template`
+- [x] 运行接口(同步执行,落 wf_run + wf_node_run)+ 运行记录回放(节点级输入/输出/耗时/状态)
+- [x] 前端:React Flow(`@xyflow/react`)编辑器(节点面板、连线、配置面板、运行染色 + 结果回放)
 
-**验收**:用编辑器搭一个"输入 → 检索 → LLM → 输出"的流程并成功运行,能看到每个节点的输入输出。
+**验收**:✅ 浏览/curl 实测 —— 编辑器搭/载入"输入 → 检索 → LLM → 输出"流程,运行成功(讯飞 768 维检索命中 1 条 → LLM 答"5433 [1]"),四节点全绿,可逐节点展开看输入(resolved prompt)/输出(text、token 数)。后端 43 passed,前后端 build 通过。
+
+> 引擎为 DAG + 条件分支:普通节点激活全部出边,condition 节点仅激活命中 handle(true/false)的出边,未激活节点记 skipped;失败即中止。
 
 ## D6 — 前端打磨 + 联调
 
 **目标**:四条链路在 UI 上顺畅可用。
 
-- [ ] 统一布局/导航/鉴权态;AG Grid(社区版)做列表页
-- [ ] 对话/知识库/应用/工作流四个模块 UI 收口
-- [ ] 错误处理、loading、空态
-- [ ] 端到端联调,修主链路 bug
+- [x] 统一布局/导航/鉴权态:共享 `TopNav`(四模块入口 + 当前路由高亮 + 用户 + 登出)+ `useRequireAuth`(统一跳登录、401 清 token);列表页用 **AG Grid 社区版**(`DataGrid` 封装:Quartz 主题 + 排序/列筛选/分页,仅社区模块)
+- [x] 对话/知识库/应用/工作流四个模块 UI 收口(顶部导航一致;应用/工作流/知识文档列表统一 AG Grid)
+- [x] 错误处理、loading、空态:共享 `States`(`PageLoading`/`EmptyState`/`ErrorBanner`/`Spinner`)
+- [x] 端到端联调,修主链路 bug
 
-**验收**:从登录到使用四大能力,全程无阻断性 bug。
+**验收**:✅ 浏览器实测 —— 登录→自动进入对话;四模块顶栏一致切换、当前页高亮;工作流列表 AG Grid(排序/筛选/分页)点行进编辑器;空库显示空态;登出回登录。前端 build + eslint(含 react-hooks 新规则)均通过。
 
 ## D7 — Agent + 部署收尾
 
 **目标**:Agent 工具调用可用;整套 compose 端到端跑通。
 
-- [ ] `agent_tool` / `agent_thought` + 迁移
-- [ ] ReAct 循环 + function calling;内置工具(知识库检索 / HTTP / 代码执行)
-- [ ] Agent 应用类型 + 前端轨迹展示
-- [ ] 可观测:请求日志、token 计量、错误上报
-- [ ] backend/web Dockerfile + 完整 `docker compose up` 端到端验证
-- [ ] README + 部署文档
+- [x] `agent_tool` / `agent_thought` + 迁移(工具挂 app_id;轨迹按 message 落库回放)
+- [x] ReAct 循环 + function calling;内置工具(知识库检索 / HTTP / 代码执行);LLM 抽象扩展 tool_calls/tool_result 双格式回传
+- [x] Agent 应用类型(app mode=agent)+ 工具配置 UI + 调试窗 ReAct 轨迹(思考/工具调用/观测可折叠)
+- [x] 可观测:结构化请求日志中间件(X-Request-ID)+ 全局异常兜底 + `/api/metrics`(进程指标)/ `/api/metrics/usage`(token 用量)
+- [x] backend/web Dockerfile + 完整 `docker compose up`(api 起前自动迁移;web standalone)
+- [x] README + 部署文档(`docs/deployment.md`)
 
-**验收**:`docker compose up -d` 一键起全栈;Agent 能自主调用工具完成一个任务并展示思考轨迹。
+**验收**:`docker compose up -d --build` 一键起 db/redis/api/worker/web;Agent 应用启用工具后,调试窗经 SSE 展示模型自主调用工具的思考轨迹。后端 55 passed,前后端 build + lint 通过。
+
+> Agent 引擎为 function-calling ReAct:模型决定调用哪个内置工具,执行结果回灌进上下文,直至产出最终答复或达到 `AGENT_MAX_ITERATIONS`(默认 6);每步落 agent_thought,可按消息回放。
 
 ---
 

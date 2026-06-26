@@ -14,12 +14,6 @@ StopReason = str  # "end_turn" | "max_tokens" | "tool_use" | "stop"
 
 
 @dataclass
-class Message:
-    role: str  # "user" | "assistant"
-    content: str
-
-
-@dataclass
 class ToolSpec:
     name: str
     description: str
@@ -31,6 +25,16 @@ class ToolCall:
     id: str
     name: str
     arguments: dict
+
+
+@dataclass
+class Message:
+    role: str  # "user" | "assistant" | "tool"
+    content: str = ""
+    # assistant 轮请求调用的工具(function calling);role="assistant" 时可携带
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    # role="tool" 时:本条是哪个工具调用的返回结果
+    tool_call_id: str | None = None
 
 
 @dataclass

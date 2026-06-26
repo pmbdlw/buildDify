@@ -4,33 +4,51 @@ import { use, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
+  type AgentTool,
   type ApiKey,
   type App,
   type AppConfig,
+  type BuiltinTool,
   type Citation,
   type Dataset,
+  addAgentTool,
   createApiKey,
+  deleteAgentTool,
   deleteApp,
   getApp,
   getAppConfig,
-  getToken,
+  listAgentTools,
   listApiKeys,
+  listBuiltinTools,
   listDatasets,
   publishApp,
   revokeApiKey,
   saveAppConfig,
+  streamAgentChat,
   streamAppChat,
+  updateAgentTool,
 } from '@/lib/api'
+import { useRequireAuth } from '@/lib/auth'
+
+interface TraceStep {
+  kind: string // thought | tool_call | observation
+  content?: string
+  tool?: string
+  input?: Record<string, unknown>
+  output?: string
+}
 
 interface UIMessage {
   role: string
   content: string
   citations?: Citation[]
+  steps?: TraceStep[]
 }
 
 export default function AppDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: appId } = use(params)
   const router = useRouter()
+  const { ready } = useRequireAuth()
 
   const [app, setApp] = useState<App | null>(null)
   const [datasets, setDatasets] = useState<Dataset[]>([])
@@ -58,14 +76,16 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
   const [newKeyName, setNewKeyName] = useState('')
   const [revealedKey, setRevealedKey] = useState('')
 
+  // Agent 工具
+  const [agentTools, setAgentTools] = useState<AgentTool[]>([])
+  const [catalog, setCatalog] = useState<BuiltinTool[]>([])
+  const isAgent = app?.mode === 'agent'
+
   useEffect(() => {
-    if (!getToken()) {
-      router.replace('/login')
-      return
-    }
+    if (!ready) return
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appId])
+  }, [appId, ready])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -83,6 +103,53 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
       applyConfig(cfg)
       setDatasets(ds)
       setKeys(ks)
+      if (a.mode === 'agent') {
+        const [tools, cat] = await Promise.all([
+          listAgentTools(appId).catch(() => [] as AgentTool[]),
+          listBuiltinTools(appId).catch(() => [] as BuiltinTool[]),
+        ])
+        setAgentTools(tools)
+        setCatalog(cat)
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  async function handleAddTool(type: string) {
+    setError('')
+    try {
+      const tool = await addAgentTool(appId, { type })
+      setAgentTools((prev) => [...prev, tool])
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  async function handleToggleTool(tool: AgentTool) {
+    try {
+      const updated = await updateAgentTool(appId, tool.id, { is_enabled: !tool.is_enabled })
+      setAgentTools((prev) => prev.map((t) => (t.id === tool.id ? updated : t)))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  async function handleToolDataset(tool: AgentTool, dsId: string) {
+    try {
+      const updated = await updateAgentTool(appId, tool.id, {
+        config: { ...tool.config, dataset_id: dsId || undefined },
+      })
+      setAgentTools((prev) => prev.map((t) => (t.id === tool.id ? updated : t)))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  async function handleDeleteTool(toolId: string) {
+    try {
+      await deleteAgentTool(appId, toolId)
+      setAgentTools((prev) => prev.filter((t) => t.id !== toolId))
     } catch (e) {
       setError((e as Error).message)
     }
@@ -138,12 +205,28 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
     }
   }
 
+  function patchLast(patch: (m: UIMessage) => UIMessage) {
+    setMessages((prev) => {
+      const next = [...prev]
+      next[next.length - 1] = patch(next[next.length - 1])
+      return next
+    })
+  }
+
   async function send() {
     const content = input.trim()
     if (!content || streaming) return
     setInput('')
     setStreaming(true)
-    setMessages((prev) => [...prev, { role: 'user', content }, { role: 'assistant', content: '' }])
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content },
+      { role: 'assistant', content: '', steps: isAgent ? [] : undefined },
+    ])
+    if (isAgent) {
+      await sendAgent(content)
+      return
+    }
     try {
       await streamAppChat(
         appId,
@@ -182,6 +265,36 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
         next[next.length - 1] = { role: 'assistant', content: `⚠️ ${(e as Error).message}` }
         return next
       })
+    } finally {
+      setStreaming(false)
+    }
+  }
+
+  async function sendAgent(content: string) {
+    try {
+      await streamAgentChat(appId, { content, conversation_id: convId ?? undefined }, (evt) => {
+        if (evt.type === 'meta') {
+          if (evt.conversation_id) setConvId(evt.conversation_id)
+        } else if (evt.type === 'thought') {
+          patchLast((m) => ({ ...m, steps: [...(m.steps ?? []), { kind: 'thought', content: evt.content }] }))
+        } else if (evt.type === 'tool_call') {
+          patchLast((m) => ({
+            ...m,
+            steps: [...(m.steps ?? []), { kind: 'tool_call', tool: evt.tool, input: evt.input }],
+          }))
+        } else if (evt.type === 'observation') {
+          patchLast((m) => ({
+            ...m,
+            steps: [...(m.steps ?? []), { kind: 'observation', tool: evt.tool, output: evt.output }],
+          }))
+        } else if (evt.type === 'answer') {
+          patchLast((m) => ({ ...m, content: evt.content ?? '' }))
+        } else if (evt.type === 'error') {
+          patchLast((m) => ({ ...m, content: `⚠️ ${evt.message}` }))
+        }
+      })
+    } catch (e) {
+      patchLast(() => ({ role: 'assistant', content: `⚠️ ${(e as Error).message}` }))
     } finally {
       setStreaming(false)
     }
@@ -337,6 +450,75 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
 
+          {/* Agent 工具(仅 agent 应用)*/}
+          {isAgent && (
+            <div className="rounded-xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-1 font-semibold">Agent 工具</h2>
+              <p className="mb-4 text-xs text-gray-400">
+                启用的工具会作为 function calling 暴露给模型,由模型在 ReAct 推理中自主调用。
+              </p>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {catalog
+                  .filter((c) => !agentTools.some((t) => t.type === c.type))
+                  .map((c) => (
+                    <button
+                      key={c.type}
+                      onClick={() => handleAddTool(c.type)}
+                      title={c.description}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:border-gray-900"
+                    >
+                      + {c.name}
+                    </button>
+                  ))}
+              </div>
+              <ul className="space-y-2">
+                {agentTools.map((t) => (
+                  <li key={t.id} className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{t.name}</p>
+                        <p className="text-xs text-gray-400">{t.type}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <label className="flex items-center gap-1 text-xs text-gray-500">
+                          <input
+                            type="checkbox"
+                            checked={t.is_enabled}
+                            onChange={() => handleToggleTool(t)}
+                          />
+                          启用
+                        </label>
+                        <button
+                          onClick={() => handleDeleteTool(t.id)}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    </div>
+                    {t.type === 'knowledge_retrieval' && (
+                      <select
+                        value={(t.config?.dataset_id as string) ?? ''}
+                        onChange={(e) => handleToolDataset(t, e.target.value)}
+                        className="mt-2 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs outline-none focus:border-gray-900"
+                      >
+                        <option value="">用应用绑定的知识库</option>
+                        {datasets.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </li>
+                ))}
+                {agentTools.length === 0 && (
+                  <p className="text-sm text-gray-400">还没有工具,从上方添加。</p>
+                )}
+              </ul>
+            </div>
+          )}
+
           {/* API Key 管理 */}
           <div className="rounded-xl border border-gray-200 bg-white p-5">
             <h2 className="mb-1 font-semibold">API Key</h2>
@@ -415,12 +597,48 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
                   key={i}
                   className={m.role === 'user' ? 'flex justify-end' : 'flex flex-col items-start'}
                 >
+                  {m.steps && m.steps.length > 0 && (
+                    <div className="mb-2 max-w-[85%] space-y-1.5">
+                      {m.steps.map((s, si) => (
+                        <div key={si} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs">
+                          {s.kind === 'thought' && (
+                            <p className="whitespace-pre-wrap text-gray-500">💭 {s.content}</p>
+                          )}
+                          {s.kind === 'tool_call' && (
+                            <details>
+                              <summary className="cursor-pointer select-none text-blue-600">
+                                🔧 调用工具 <span className="font-medium">{s.tool}</span>
+                              </summary>
+                              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-gray-500">
+                                {JSON.stringify(s.input, null, 2)}
+                              </pre>
+                            </details>
+                          )}
+                          {s.kind === 'observation' && (
+                            <details>
+                              <summary className="cursor-pointer select-none text-emerald-600">
+                                📥 {s.tool} 返回
+                              </summary>
+                              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-gray-500">
+                                {s.output}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div
                     className={`whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm ${
                       m.role === 'user' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'
                     } max-w-[85%]`}
                   >
-                    {m.content || (streaming ? '…' : '')}
+                    {m.content ||
+                      (streaming
+                        ? m.steps && m.steps.length > 0
+                          ? '推理中…'
+                          : '…'
+                        : '')}
                   </div>
                   {m.citations && m.citations.length > 0 && (
                     <div className="mt-2 max-w-[85%] space-y-1">

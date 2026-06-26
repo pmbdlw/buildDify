@@ -3,25 +3,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { type ColDef } from 'ag-grid-community'
-import { type App, createApp, listApps } from '@/lib/api'
+import { type WorkflowListItem, createWorkflow, listWorkflows } from '@/lib/api'
 import { useRequireAuth } from '@/lib/auth'
 import { formatDateTime } from '@/lib/format'
 import TopNav from '@/components/TopNav'
 import DataGrid from '@/components/DataGrid'
 import { EmptyState, ErrorBanner, PageLoading } from '@/components/States'
 
-const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
-  draft: { text: '草稿', cls: 'bg-gray-100 text-gray-600' },
-  published: { text: '已发布', cls: 'bg-green-100 text-green-700' },
-}
-
-export default function AppsPage() {
+export default function WorkflowsPage() {
   const router = useRouter()
   const { ready, user } = useRequireAuth()
-  const [apps, setApps] = useState<App[]>([])
+  const [items, setItems] = useState<WorkflowListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
-  const [newMode, setNewMode] = useState('chatbot')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
@@ -30,8 +24,8 @@ export default function AppsPage() {
     let alive = true
     void (async () => {
       try {
-        const data = await listApps()
-        if (alive) setApps(data)
+        const data = await listWorkflows()
+        if (alive) setItems(data)
       } catch (e) {
         if (alive) setError((e as Error).message)
       } finally {
@@ -49,33 +43,24 @@ export default function AppsPage() {
     setCreating(true)
     setError('')
     try {
-      const app = await createApp(name, newMode)
+      const wf = await createWorkflow(name)
       setNewName('')
-      router.push(`/apps/${app.id}`)
+      router.push(`/workflows/${wf.id}`)
     } catch (e) {
       setError((e as Error).message)
       setCreating(false)
     }
   }
 
-  const columnDefs = useMemo<ColDef<App>[]>(
+  const columnDefs = useMemo<ColDef<WorkflowListItem>[]>(
     () => [
       { headerName: '名称', field: 'name', flex: 2, minWidth: 160 },
-      {
-        headerName: '状态',
-        field: 'status',
-        maxWidth: 120,
-        cellRenderer: (p: { value: string }) => {
-          const s = STATUS_LABEL[p.value] ?? STATUS_LABEL.draft
-          return <span className={`rounded-full px-2 py-0.5 text-xs ${s.cls}`}>{s.text}</span>
-        },
-      },
-      { headerName: '类型', field: 'mode', maxWidth: 120 },
+      { headerName: '版本', field: 'version', maxWidth: 110, valueFormatter: (p) => `v${p.value}` },
       {
         headerName: '描述',
         field: 'description',
         flex: 2,
-        valueFormatter: (p) => p.value || 'Chatbot 应用',
+        valueFormatter: (p) => p.value || '可视化节点编排',
       },
       {
         headerName: '更新时间',
@@ -94,21 +79,13 @@ export default function AppsPage() {
       <TopNav user={user} />
       <main className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-6 py-6">
         <div className="mb-5 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">应用</h1>
+          <h1 className="text-lg font-semibold">工作流</h1>
           <div className="flex gap-2">
-            <select
-              value={newMode}
-              onChange={(e) => setNewMode(e.target.value)}
-              className="rounded-lg border border-gray-300 px-2 py-2 text-sm outline-none focus:border-gray-900"
-            >
-              <option value="chatbot">Chatbot</option>
-              <option value="agent">Agent</option>
-            </select>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              placeholder="新建应用名称"
+              placeholder="新建工作流名称"
               className="w-56 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
             />
             <button
@@ -125,13 +102,13 @@ export default function AppsPage() {
 
         {loading ? (
           <PageLoading />
-        ) : apps.length === 0 ? (
-          <EmptyState text="还没有应用,新建一个 Chatbot 应用开始。" />
+        ) : items.length === 0 ? (
+          <EmptyState text="还没有工作流,新建一个并在画布上编排节点。" />
         ) : (
-          <DataGrid<App>
-            rowData={apps}
+          <DataGrid<WorkflowListItem>
+            rowData={items}
             columnDefs={columnDefs}
-            onRowClicked={(row) => router.push(`/apps/${row.id}`)}
+            onRowClicked={(row) => router.push(`/workflows/${row.id}`)}
           />
         )}
       </main>
