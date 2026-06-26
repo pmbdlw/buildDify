@@ -1,6 +1,8 @@
 # 架构设计文档 —— 定制化 LLM 应用平台
 
 > 对标 Dify 能力模型,**不使用 Dify 源码**,从零构建。本文档描述系统的目标、技术栈、分层架构、核心数据模型与关键子系统设计。
+>
+> **状态:四大能力链路(对话 / RAG / 工作流 / Agent)D1–D7 全部落地并实测通过。** 图文并茂的总览见 [docs/site/index.html](./site/index.html)。
 
 ## 1. 目标与范围
 
@@ -23,7 +25,7 @@
 | 异步任务 | Celery + Redis(文档分块、embedding、长任务) |
 | 数据库 | PostgreSQL 16 + **pgvector**(关系数据与向量同库,少一个服务) |
 | 缓存/队列 | Redis 7 |
-| 前端 | Next.js 15 (App Router) · TypeScript · Tailwind · React Flow · AG Grid 社区版 |
+| 前端 | Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · React Flow(`@xyflow/react`)· AG Grid 社区版 |
 | LLM | 首选 Claude(`claude-opus-4-8` / `claude-sonnet-4-6`),Anthropic SDK;经 provider 抽象 |
 | 包管理 | 后端 `uv`,前端 `pnpm` |
 | 部署 | docker compose(无 `version` 头):`api` / `worker` / `web` / `db` / `redis` |
@@ -65,9 +67,11 @@ backend/app/
   models/        # ORM 模型(SQLAlchemy)。
   schemas/       # Pydantic 输入/输出 DTO。
   core/          # 配置、鉴权、依赖、异常、日志。
-  llm/           # 模型 provider 抽象 + Claude 实现。
-  workflow/      # 工作流节点执行引擎。
-  tasks/         # Celery 任务。
+  llm/           # 模型 provider 抽象 + Anthropic/OpenAI 实现 + 双格式线转换。
+  workflow/      # 工作流节点执行引擎(拓扑排序 + 变量池 + 条件分支)。
+  agent/         # Agent 内置工具注册表 + ReAct(function calling)循环。
+  tasks/         # Celery 任务(文档分块/embedding)。
+  core/          # 配置、鉴权、依赖、可观测(请求日志/指标)。
   main.py        # FastAPI 应用入口。
 alembic/         # 数据库迁移。
 ```
@@ -92,8 +96,8 @@ alembic/         # 数据库迁移。
 | 工作流 | `wf_workflow` | 工作流定义(graph JSON) |
 | | `wf_node_run` | 节点执行记录(输入/输出/耗时/状态) |
 | | `wf_run` | 工作流运行实例 |
-| Agent | `agent_tool` | 工具定义(name、schema、handler 类型) |
-| | `agent_thought` | ReAct 思考/动作/观察轨迹 |
+| Agent | `agent_tool` | Agent 应用启用的内置工具(type=内置键、name、config、is_enabled),挂 `app_id` |
+| | `agent_thought` | ReAct 轨迹步骤(kind=thought/tool_call/observation/answer),按 `message_id` 回放 |
 
 > 所有迁移用 `/db-migration` 技能生成,确保命名规范不跑偏。
 
@@ -132,7 +136,14 @@ class LLMProvider(Protocol):
 
 客户端用 OpenAI SDK 请求 `model="claude-*"` 也能打到 Anthropic 上游(反之亦然)。已用讯飞 MaaS 双端点实测:OpenAI 格式入 ↔ Anthropic 上游、Anthropic 格式入 ↔ OpenAI 上游,非流式/流式均通过。
 
-> TODO(D4):网关用 `auth_api_key` 鉴权 + 限流计量(当前 MVP 未鉴权)。
+### 6.3 工具结果回传(D7 扩展)
+
+为支撑 Agent 多轮 function calling,`Message` 抽象扩展了 `tool_calls`(assistant 轮请求的工具)与 `tool_call_id`(role=tool 的返回归属);两个 provider 各自序列化为对应线格式:
+
+- OpenAI:`assistant.tool_calls[]` + `role:"tool"` 结果消息。
+- Anthropic:assistant 的 `tool_use` 块 + user 的 `tool_result` 块(连续结果合并进同一 user 消息)。
+
+> 网关(`/v1/*`)仍为 MVP 未鉴权;对外应用调用走 `auth_api_key` 的 `/v1/apps/{id}/chat`(D4 已实现按 key 鉴权 + `last_used_at` 计量)。
 
 ## 7. RAG 管线
 
@@ -150,9 +161,9 @@ flowchart LR
   Inject --> LLM[LLM 生成]
 ```
 
-- 解析/分块/embedding 为重任务,走 **Celery worker** 异步;文档状态机:`pending → parsing → embedding → ready / failed`。
-- 检索用 pgvector `<=>`(cosine)+ `idx_kb_segment_embedding`(HNSW/IVFFlat)。
-- 回答附 `kb_segment` 引用,前端可溯源。
+- 上传时同步解析 PDF/MD/TXT 为文本落库;分块 + embedding 为重任务,走 **Celery worker** 异步;文档状态机:`pending → processing → ready / error`。
+- 检索用 pgvector cosine + `idx_kb_segment_embedding`;embedding 维度由 `EMBEDDING_DIM` 决定(实测讯飞 768 维)。
+- 对话链路:`ChatIn.dataset_id` → 检索 top-k → 拼进 system 上下文 → 生成,SSE `meta` 回传引用,前端折叠溯源。
 
 ## 8. 工作流引擎
 
@@ -165,9 +176,23 @@ flowchart LR
 
 ## 9. Agent 设计
 
-- 基于 **ReAct 循环**:LLM 决策 → 选择工具 → 执行 → 观察 → 迭代,直到产出最终答案或达最大轮次。
-- 工具经 Claude **function calling**(tool use)暴露;工具定义存 `agent_tool`,含 JSON schema。
-- 内置工具:知识库检索、HTTP 请求、代码执行;轨迹落 `agent_thought` 便于调试。
+- Agent 是一种应用类型(`app_app.mode = "agent"`),复用应用配置(模型/system/参数/绑定知识库)与会话/消息体系。
+- 基于 **function-calling ReAct 循环**(`app/agent/react.py`):带工具规格调 `provider.chat` → 若返回 tool_use 则执行工具、把观测回灌进上下文 → 迭代,直到无工具调用产出最终答复,或达 `AGENT_MAX_ITERATIONS`(默认 6)兜底。
+- 内置工具注册表(`app/agent/tools.py`),每个工具声明 JSON Schema + `execute`:
+  - `knowledge_retrieval` —— 复用 RAG 检索(dataset_id 可单配,缺省回退应用绑定库)。
+  - `http_request` —— GET/POST,仅 http(s),可配 `allow_url_prefix` 限制目标、响应截断。
+  - `code_exec` —— 受限 builtins 执行 Python,取 `result` 变量。
+- 启用的工具按 `app_id` 存 `agent_tool`(同类型至多一个);运行轨迹逐步落 `agent_thought`,经 SSE 实时推送(thought/tool_call/observation/answer),并可按消息回放。
+
+```mermaid
+flowchart LR
+  U[用户输入] --> M{provider.chat<br/>带工具规格}
+  M -->|tool_use| T[执行内置工具]
+  T --> O[观测结果回灌]
+  O --> M
+  M -->|无工具调用| A[最终答复]
+  M -. 超过 max_iterations .-> A
+```
 
 ## 10. 鉴权与发布
 
@@ -175,21 +200,28 @@ flowchart LR
 - 已发布应用对外:`auth_api_key`,按 key 限流与计量。
 - 应用配置版本化(`app_app_config`),发布即锁定一个版本。
 
-## 11. 部署
+## 11. 可观测(D7)
 
-`docker compose`(无 `version` 头)五服务:
+- **请求日志**:`RequestLoggingMiddleware` 为每个请求生成 `X-Request-ID`,输出结构化 JSON 一行(method/path/status/耗时),并兜底未捕获异常(记堆栈 + 返回统一 500)。
+- **进程指标**:`GET /api/metrics` 暴露累计请求数 / 错误数 / 平均时延 / 状态码分布(无鉴权,便于探活采集)。
+- **token 计量**:`GET /api/metrics/usage`(需鉴权)按模型汇总当前用户助手消息的 input/output token。
+- 生产可平滑替换为 Prometheus / OpenTelemetry;日志已是结构化 JSON,接采集即可。
+
+## 12. 部署
+
+`docker compose`(无 `version` 头)五服务,`up -d --build` 一键起全栈:
 
 | 服务 | 镜像/构建 | 职责 |
 |---|---|---|
-| `db` | postgres:16 + pgvector | 关系数据 + 向量 |
+| `db` | pgvector/pgvector:pg16 | 关系数据 + 向量(宿主机 5433→5432) |
 | `redis` | redis:7 | 缓存 + Celery broker/backend |
-| `api` | backend Dockerfile | FastAPI |
+| `api` | backend Dockerfile | FastAPI;**启动前自动 `alembic upgrade head`** |
 | `worker` | backend Dockerfile | Celery worker |
-| `web` | web Dockerfile | Next.js |
+| `web` | web Dockerfile | Next.js standalone |
 
-本地开发:`docker compose up -d db redis`,api/web 本地热重载;迁移 `uv run alembic upgrade head`。
+本地开发:`docker compose up -d db redis`,api/web 本地热重载;迁移 `uv run alembic upgrade head`。详见 [部署文档](./deployment.md)。
 
-## 12. 关键设计权衡
+## 13. 关键设计权衡
 
 | 决策 | 取舍 |
 |---|---|
