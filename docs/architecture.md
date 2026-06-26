@@ -97,19 +97,42 @@ alembic/         # 数据库迁移。
 
 > 所有迁移用 `/db-migration` 技能生成,确保命名规范不跑偏。
 
-## 6. LLM Provider 抽象
+## 6. LLM 抽象 —— 双格式(Anthropic + OpenAI)
 
-`llm/` 定义统一接口,屏蔽厂商差异,便于后续接入更多模型:
+平台在**上游**与**下游**两个方向都同时兼容 Anthropic 与 OpenAI 两种格式。
+
+### 6.1 上游适配(`app/llm/`)
+
+统一内部表示(`ChatRequest` / `ChatResult` / `ToolSpec` / `ToolCall`),两个 adapter 屏蔽厂商差异:
 
 ```python
 class LLMProvider(Protocol):
-    async def chat(self, messages, *, model, tools=None, stream=False) -> ChatResult | AsyncIterator[Chunk]: ...
-    async def embed(self, texts: list[str], *, model) -> list[list[float]]: ...
+    name: str
+    default_model: str
+    async def chat(self, req: ChatRequest) -> ChatResult: ...
+    def stream(self, req: ChatRequest) -> AsyncIterator[str]: ...        # 文本增量
+    async def embed(self, texts, *, model=None) -> list[list[float]]: ...
 ```
 
-- 默认实现 `AnthropicProvider`(Claude),embedding 可用 Anthropic 或独立 embedding 服务。
-- 上层(service / workflow / agent)只依赖 `LLMProvider`,通过工厂按配置注入具体实现。
-- 流式统一为 SSE 输出到前端。
+- `AnthropicProvider` —— Anthropic Messages API(Claude,或任意 Anthropic 兼容网关,如讯飞 `/anthropic`)。
+- `OpenAIProvider` —— OpenAI Chat Completions(改 `base_url` 即接 GPT / DeepSeek / vLLM / Ollama / 讯飞 `/v2` 等)。
+- `factory.resolve_provider(model)` 按模型名路由(`claude*`→anthropic,`gpt*/deepseek*/...`→openai),否则用 `LLM_PROVIDER` 默认。
+- 上层(service / workflow / agent)只依赖 `LLMProvider`,格式无关。
+- embedding 走 OpenAI 兼容端点(Anthropic 无原生 embedding)。
+
+### 6.2 下游网关(`app/api/llm_gateway.py`)
+
+对外同时暴露两种线格式端点,**请求格式与上游 provider 解耦**(纯转换函数在 `app/llm/wire.py`):
+
+| 端点 | 入参格式 | 出参格式 |
+|---|---|---|
+| `POST /v1/chat/completions` | OpenAI | OpenAI(含 SSE 流 + `[DONE]`) |
+| `POST /v1/messages` | Anthropic | Anthropic(含 SSE 事件流) |
+| `POST /v1/embeddings` | OpenAI | OpenAI |
+
+客户端用 OpenAI SDK 请求 `model="claude-*"` 也能打到 Anthropic 上游(反之亦然)。已用讯飞 MaaS 双端点实测:OpenAI 格式入 ↔ Anthropic 上游、Anthropic 格式入 ↔ OpenAI 上游,非流式/流式均通过。
+
+> TODO(D4):网关用 `auth_api_key` 鉴权 + 限流计量(当前 MVP 未鉴权)。
 
 ## 7. RAG 管线
 

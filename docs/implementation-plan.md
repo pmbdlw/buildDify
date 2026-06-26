@@ -41,7 +41,8 @@
 
 **目标**:前端与 Claude 流式对话,历史落库。
 
-- [ ] `llm/` provider 抽象 + `AnthropicProvider.chat`(流式)
+- [x] `llm/` provider 抽象 + **双格式上游**(`AnthropicProvider` + `OpenAIProvider`,chat/stream/embed)+ 工厂路由
+- [x] **双格式下游网关**:`/v1/chat/completions`(OpenAI)、`/v1/messages`(Anthropic)、`/v1/embeddings`,跨格式互通(讯飞 MaaS 实测)
 - [ ] `app_conversation` / `app_message` 表 + 迁移
 - [ ] 对话 service:创建会话、追加消息、调用 LLM
 - [ ] SSE 流式接口 `POST /chat`
