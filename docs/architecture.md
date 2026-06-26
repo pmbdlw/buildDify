@@ -88,7 +88,7 @@ alembic/         # 数据库迁移。
 | | `app_message` | 消息(role、content、token 统计、引用) |
 | 知识库 | `kb_dataset` | 知识库 |
 | | `kb_document` | 文档 |
-| | `kb_segment` | 分块,含 `embedding vector(1536)` 列 + `idx_kb_segment_embedding` |
+| | `kb_segment` | 分块,含 `embedding vector(768)` 列(匹配讯飞 `xop3qwen8bembedding`)+ 向量索引 |
 | 工作流 | `wf_workflow` | 工作流定义(graph JSON) |
 | | `wf_node_run` | 节点执行记录(输入/输出/耗时/状态) |
 | | `wf_run` | 工作流运行实例 |
