@@ -13,10 +13,20 @@ class ConversationRepository:
         self.session = session
 
     async def create(
-        self, *, user_id: uuid.UUID, title: str, model: str | None, system_prompt: str | None
+        self,
+        *,
+        user_id: uuid.UUID,
+        title: str,
+        model: str | None,
+        system_prompt: str | None,
+        app_id: uuid.UUID | None = None,
     ) -> Conversation:
         conv = Conversation(
-            user_id=user_id, title=title, model=model, system_prompt=system_prompt
+            user_id=user_id,
+            title=title,
+            model=model,
+            system_prompt=system_prompt,
+            app_id=app_id,
         )
         self.session.add(conv)
         await self.session.flush()
@@ -32,6 +42,30 @@ class ConversationRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_for_app(
+        self, conversation_id: uuid.UUID, app_id: uuid.UUID
+    ) -> Conversation | None:
+        result = await self.session.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_app(self, app_id: uuid.UUID, user_id: uuid.UUID) -> list[Conversation]:
+        result = await self.session.execute(
+            select(Conversation)
+            .where(
+                Conversation.app_id == app_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(Conversation.updated_at.desc())
+        )
+        return list(result.scalars().all())
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[Conversation]:
         result = await self.session.execute(

@@ -105,9 +105,14 @@ export default function KnowledgePage() {
       <aside className="flex w-64 flex-col border-r border-gray-200 bg-gray-50">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <span className="text-sm font-semibold">知识库</span>
-          <Link href="/chat" className="text-xs text-gray-500 hover:text-gray-900">
-            去对话 →
-          </Link>
+          <div className="flex gap-3 text-xs text-gray-500">
+            <Link href="/apps" className="hover:text-gray-900">
+              应用
+            </Link>
+            <Link href="/chat" className="hover:text-gray-900">
+              去对话 →
+            </Link>
+          </div>
         </div>
         <div className="flex gap-2 p-3">
           <input

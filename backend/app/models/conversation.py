@@ -19,6 +19,8 @@ class Conversation(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # 归属应用(为空表示普通对话,非应用调试/对外调用)
+    app_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)

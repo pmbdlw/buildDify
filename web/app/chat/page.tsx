@@ -169,9 +169,14 @@ export default function ChatPage() {
               ))}
             </select>
           </div>
-          <Link href="/knowledge" className="text-sm text-gray-500 hover:text-gray-900">
-            管理知识库 →
-          </Link>
+          <div className="flex gap-4 text-sm text-gray-500">
+            <Link href="/apps" className="hover:text-gray-900">
+              应用
+            </Link>
+            <Link href="/knowledge" className="hover:text-gray-900">
+              管理知识库 →
+            </Link>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="mx-auto max-w-2xl space-y-4">

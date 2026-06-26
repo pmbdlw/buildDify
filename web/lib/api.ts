@@ -128,27 +128,7 @@ export async function streamChat(
     const detail = await res.json().catch(() => ({}))
     throw new ApiError(res.status, detail?.detail ?? `请求失败(${res.status})`)
   }
-
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const blocks = buf.split('\n\n')
-    buf = blocks.pop() ?? ''
-    for (const block of blocks) {
-      const line = block.trim()
-      if (!line.startsWith('data:')) continue
-      const evt = JSON.parse(line.slice(5).trim())
-      if (evt.type === 'meta')
-        handlers.onMeta?.(evt.conversation_id, evt.model, evt.citations ?? [])
-      else if (evt.type === 'delta') handlers.onDelta?.(evt.content)
-      else if (evt.type === 'done') handlers.onDone?.(evt.message_id)
-      else if (evt.type === 'error') handlers.onError?.(evt.message)
-    }
-  }
+  await consumeSSE(res.body, handlers)
 }
 
 // ---- 知识库 ----
@@ -203,4 +183,149 @@ export async function uploadDocument(datasetId: string, file: File): Promise<KbD
     throw new ApiError(res.status, detail?.detail ?? `上传失败(${res.status})`)
   }
   return res.json() as Promise<KbDocument>
+}
+
+// ---- 应用构建器 ----
+export interface App {
+  id: string
+  name: string
+  description: string | null
+  mode: string
+  status: string // draft | published
+  published_config_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AppConfig {
+  id: string
+  app_id: string
+  version: number
+  model: string | null
+  system_prompt: string | null
+  temperature: number | null
+  max_tokens: number
+  dataset_id: string | null
+  created_at: string
+}
+
+export interface AppConfigInput {
+  model?: string | null
+  system_prompt?: string | null
+  temperature?: number | null
+  max_tokens: number
+  dataset_id?: string | null
+}
+
+export interface ApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  last_used_at: string | null
+  created_at: string
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  key: string
+}
+
+export function listApps() {
+  return apiFetch<App[]>('/api/apps')
+}
+
+export function createApp(name: string, description?: string) {
+  return apiFetch<App>('/api/apps', {
+    method: 'POST',
+    body: JSON.stringify({ name, description: description ?? null }),
+  })
+}
+
+export function getApp(appId: string) {
+  return apiFetch<App>(`/api/apps/${appId}`)
+}
+
+export function updateApp(appId: string, data: { name?: string; description?: string }) {
+  return apiFetch<App>(`/api/apps/${appId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteApp(appId: string) {
+  return apiFetch<void>(`/api/apps/${appId}`, { method: 'DELETE' })
+}
+
+export function getAppConfig(appId: string) {
+  return apiFetch<AppConfig>(`/api/apps/${appId}/config`)
+}
+
+export function saveAppConfig(appId: string, config: AppConfigInput) {
+  return apiFetch<AppConfig>(`/api/apps/${appId}/config`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export function publishApp(appId: string) {
+  return apiFetch<App>(`/api/apps/${appId}/publish`, { method: 'POST' })
+}
+
+export function listApiKeys(appId: string) {
+  return apiFetch<ApiKey[]>(`/api/apps/${appId}/api-keys`)
+}
+
+export function createApiKey(appId: string, name: string) {
+  return apiFetch<ApiKeyCreated>(`/api/apps/${appId}/api-keys`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function revokeApiKey(appId: string, keyId: string) {
+  return apiFetch<void>(`/api/apps/${appId}/api-keys/${keyId}`, { method: 'DELETE' })
+}
+
+// 应用调试对话(走最新配置版本,SSE 流式)
+export async function streamAppChat(
+  appId: string,
+  body: { content: string; conversation_id?: string },
+  handlers: StreamHandlers,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/apps/${appId}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok || !res.body) {
+    const detail = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, detail?.detail ?? `请求失败(${res.status})`)
+  }
+  await consumeSSE(res.body, handlers)
+}
+
+// SSE 流读公共逻辑(对话页与应用调试窗共用)
+async function consumeSSE(stream: ReadableStream<Uint8Array>, handlers: StreamHandlers) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const blocks = buf.split('\n\n')
+    buf = blocks.pop() ?? ''
+    for (const block of blocks) {
+      const line = block.trim()
+      if (!line.startsWith('data:')) continue
+      const evt = JSON.parse(line.slice(5).trim())
+      if (evt.type === 'meta')
+        handlers.onMeta?.(evt.conversation_id, evt.model, evt.citations ?? [])
+      else if (evt.type === 'delta') handlers.onDelta?.(evt.content)
+      else if (evt.type === 'done') handlers.onDone?.(evt.message_id)
+      else if (evt.type === 'error') handlers.onError?.(evt.message)
+    }
+  }
 }

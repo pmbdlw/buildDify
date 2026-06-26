@@ -69,13 +69,13 @@
 
 **目标**:把"对话"产品化为可配置、可发布的应用。
 
-- [ ] `app_app` / `app_app_config`(版本化)+ 迁移
-- [ ] 应用 CRUD + 配置(prompt、模型、参数、绑定知识库)
-- [ ] 运行接口按应用配置驱动对话/检索
-- [ ] `auth_api_key` + 对外运行接口(按 key 调用)
-- [ ] 前端:应用列表、应用配置页、调试对话窗
+- [x] `app_app` / `app_app_config`(版本化,published_config_id 指向已发布版)/ `auth_api_key` + 迁移;`app_conversation` 加 `app_id`
+- [x] 应用 CRUD + 配置(prompt、模型、temperature/max_tokens、绑定知识库);每次保存自增 version
+- [x] 运行接口按应用配置驱动对话/检索(调试用最新版,对外用已发布版;复用 RAG 链路)
+- [x] `auth_api_key`(sha256 哈希,明文仅创建时返回一次)+ 对外运行接口 `POST /v1/apps/{id}/chat`(X-API-Key / Bearer 鉴权)
+- [x] 前端:应用列表、应用配置页(含 API Key 管理)、调试对话窗(SSE)
 
-**验收**:新建一个 chatbot 应用、配好 prompt 与知识库、在调试窗对话通过;用 API Key 也能调通。
+**验收**:✅ curl 实测 —— 新建 chatbot 应用→存配置(system_prompt 生效:"喵")→发布→调试窗流式对话通过;创建 API Key→`/v1/apps/{id}/chat` 带 key 调通、无/错 key 401、吊销后失效、last_used_at 更新。后端 33 passed,前后端 build 通过。
 
 ## D5 — 工作流引擎
 
