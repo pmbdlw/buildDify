@@ -2,7 +2,9 @@
 FROM node:22-slim AS deps
 RUN corepack enable
 WORKDIR /app
-COPY package.json pnpm-lock.yaml* ./
+# pnpm-workspace.yaml 含 allowBuilds 白名单(sharp/unrs-resolver),
+# 不复制会触发 ERR_PNPM_IGNORED_BUILDS 导致安装非零退出。
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 RUN pnpm install --frozen-lockfile || pnpm install
 
 FROM node:22-slim AS builder
