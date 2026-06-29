@@ -19,16 +19,28 @@ def detect_file_type(filename: str) -> str:
 
 
 def parse(data: bytes, file_type: str) -> str:
-    """按类型解析字节为文本。"""
+    """按类型解析字节为文本(出口统一清洗,去除 NUL 等 PostgreSQL 无法入库的字符)。"""
     if file_type == "pdf":
-        return _parse_pdf(data)
-    # txt / md:尝试 utf-8,退回 gbk,最终忽略不可解码字节
+        text = _parse_pdf(data)
+    else:
+        # txt / md:尝试 utf-8,退回 gbk,最终忽略不可解码字节
+        text = _decode_text(data)
+    return _sanitize(text)
+
+
+def _decode_text(data: bytes) -> str:
     for enc in ("utf-8", "gbk"):
         try:
             return data.decode(enc)
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="ignore")
+
+
+def _sanitize(text: str) -> str:
+    """剔除 NUL 字节(\\x00):PostgreSQL text/varchar 不允许,否则入库报
+    invalid byte sequence for encoding "UTF8": 0x00。PDF 抽取常见。"""
+    return text.replace("\x00", "")
 
 
 def _parse_pdf(data: bytes) -> str:
