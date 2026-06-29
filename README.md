@@ -111,4 +111,24 @@ pnpm build
 
 ## 部署
 
-见 [部署文档](docs/deployment.md)。
+### 部署到自己的服务器(纯 IP 演示)
+
+用 `docker-compose.prod.yml`,改动相比开发版:前端 API 地址用 `${SERVER_HOST}` 注入(替代写死的 localhost)、db/redis 不对外暴露、web/api 走 3000/8000 避开 80/443。
+
+```bash
+git clone https://github.com/pmbdlw/buildDify.git && cd buildDify
+
+cp .env.example .env                    # 把 SERVER_HOST 改成服务器公网 IP
+cp backend/.env.example backend/.env    # 填入 LLM 密钥(见上方环境变量)
+
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+- 前端:`http://<SERVER_HOST>:3000` · 后端:`http://<SERVER_HOST>:8000`
+- `SERVER_HOST` 在构建时被内联进前端包,**改了 IP 要重新 `--build`**。
+- 云服务器需在安全组放行入站 **3000 / 8000**。
+- 更新:`git pull` 后再跑一次 `up -d --build`。
+
+> 此配置面向演示:无 HTTPS、沿用占位密钥。正式上线请换强密钥并在前面挂 Nginx/Caddy 做反代与 TLS。
+
+完整说明见 [部署文档](docs/deployment.md)。
