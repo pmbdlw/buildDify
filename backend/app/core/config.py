@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     app_name: str = "buildDify"
     debug: bool = False
 
+    # CORS 允许来源(正则,需完整匹配 Origin)。默认仅本机;
+    # 生产/演示用 IP 访问时,经 CORS_ORIGIN_REGEX 环境变量放行(见 docker-compose.prod.yml)。
+    cors_origin_regex: str = r"http://(localhost|127\.0\.0\.1):\d+"
+
     # 数据库 / Redis
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/builddify"
     redis_url: str = "redis://localhost:6379/0"

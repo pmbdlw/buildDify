@@ -17,10 +17,10 @@ app = FastAPI(title=settings.app_name)
 # 请求日志 + 异常兜底(最外层中间件,覆盖全部路由)
 app.add_middleware(RequestLoggingMiddleware)
 
-# 开发期允许前端跨域(生产应收紧为固定域名)
+# 跨域来源由 settings.cors_origin_regex 控制(默认仅本机;IP/域名访问经环境变量放行)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,4 +40,6 @@ app.include_router(apps.public_router)  # 对外运行:/v1/apps/{id}/chat(API Ke
 app.include_router(workflows.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")  # Agent:工具 CRUD + ReAct 调试 + 轨迹回放
 app.include_router(metrics.router, prefix="/api")  # 可观测:/api/metrics、/api/metrics/usage
-app.include_router(llm_gateway.router)  # 兼容网关:/v1/chat/completions、/v1/messages、/v1/embeddings
+app.include_router(
+    llm_gateway.router
+)  # 兼容网关:/v1/chat/completions、/v1/messages、/v1/embeddings

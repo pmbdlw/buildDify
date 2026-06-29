@@ -44,6 +44,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/builddify
       REDIS_URL: redis://redis:6379/0
+      # 演示用 IP 访问:放行任意 http 来源(含 http://<SERVER_HOST>:3000),解决跨域。
+      # 正式上线请收紧为固定域名,如 http://app\.example\.com
+      CORS_ORIGIN_REGEX: "http://.*"
     command: sh -c "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
