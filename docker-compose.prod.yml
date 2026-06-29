@@ -1,0 +1,86 @@
+# 生产/演示编排:纯 IP 访问,无 HTTPS。给朋友看的 Demo。
+# 用法(在服务器项目根目录):
+#   1) cp .env.example .env  并把 SERVER_HOST 改成你的服务器公网 IP
+#   2) 确保 backend/.env 已存在(从 backend/.env.example 复制并填 LLM 密钥)
+#   3) docker compose -f docker-compose.prod.yml up -d --build
+# 访问:web → http://<SERVER_HOST>:3000   api → http://<SERVER_HOST>:8000
+#
+# 与开发用 docker-compose.yml 的区别:
+#   - 前端 API 地址用 ${SERVER_HOST} 注入,不再写死 localhost
+#   - db / redis 不对外暴露端口,只走 compose 内网
+#   - web/api 避开 80/443(服务器上已有服务占用)
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: builddify
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d builddify"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/builddify
+      REDIS_URL: redis://redis:6379/0
+    command: sh -c "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/builddify
+      REDIS_URL: redis://redis:6379/0
+    command: uv run celery -A app.tasks.celery_app worker -l info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      args:
+        # 浏览器直接连服务器 IP 上的 api;SERVER_HOST 从根目录 .env 注入
+        NEXT_PUBLIC_API_BASE: http://${SERVER_HOST}:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
